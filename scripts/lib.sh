@@ -42,7 +42,18 @@ wait_until() {
   shift 2
   local deadline=$((SECONDS + timeout_seconds))
 
-  until "$@"; do
+  while true; do
+    # Readiness predicates are expected to fail transiently. Run each probe in a
+    # subshell without the caller's ERR trap so an intermediate curl/psql error
+    # becomes a retry instead of aborting the enclosing verification script.
+    if (
+      trap - ERR
+      set +e
+      set +E
+      "$@"
+    ); then
+      return 0
+    fi
     if ((SECONDS >= deadline)); then
       printf 'Timed out after %ss waiting for %s.\n' "$timeout_seconds" "$description" >&2
       return 1
