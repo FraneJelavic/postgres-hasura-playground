@@ -1,0 +1,69 @@
+scope: postgres-hasura-playground
+namespace: /playground/
+name: overridden-by-environment
+
+restapi:
+  listen: 0.0.0.0:8008
+  connect_address: overridden-by-environment:8008
+
+etcd3:
+  hosts:
+    - etcd1:2379
+    - etcd2:2379
+    - etcd3:2379
+
+bootstrap:
+  dcs:
+    ttl: 15
+    loop_wait: 5
+    retry_timeout: 5
+    maximum_lag_on_failover: 16777216
+    check_timeline: true
+    failsafe_mode: true
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        wal_level: replica
+        hot_standby: "on"
+        wal_log_hints: "on"
+        max_wal_senders: 12
+        max_replication_slots: 12
+        max_connections: 100
+        max_slot_wal_keep_size: 2GB
+        password_encryption: scram-sha-256
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+  pg_hba:
+    - local all all trust
+    - host all all 127.0.0.1/32 trust
+    - host all all 0.0.0.0/0 scram-sha-256
+    - host replication replicator 0.0.0.0/0 scram-sha-256
+
+postgresql:
+  listen: 0.0.0.0:5432
+  connect_address: overridden-by-environment:5432
+  data_dir: /var/lib/postgresql/data/pgdata
+  bin_dir: /usr/lib/postgresql/16/bin
+  pgpass: /var/lib/postgresql/.pgpass
+  authentication:
+    superuser:
+      username: postgres
+    replication:
+      username: replicator
+    rewind:
+      username: rewind
+  parameters:
+    unix_socket_directories: /var/run/postgresql
+  use_pg_rewind: true
+  use_slots: true
+
+watchdog:
+  mode: off
+
+tags:
+  nofailover: false
+  noloadbalance: false
+  clonefrom: false
+  nosync: false

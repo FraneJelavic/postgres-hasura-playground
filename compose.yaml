@@ -1,0 +1,225 @@
+x-etcd-image: &etcd-image quay.io/coreos/etcd:v3.5.33
+x-haproxy-image: &haproxy-image haproxy:3.2.22-alpine
+
+x-etcd-common: &etcd-common
+  image: *etcd-image
+  restart: unless-stopped
+  networks: [playground]
+  environment:
+    ETCDCTL_API: "3"
+  healthcheck:
+    test: ["CMD", "etcdctl", "--endpoints=http://127.0.0.1:2379", "endpoint", "health"]
+    interval: 5s
+    timeout: 4s
+    retries: 20
+    start_period: 10s
+
+x-postgres-environment: &postgres-environment
+  PATRONI_SCOPE: postgres-hasura-playground
+  PATRONI_SUPERUSER_USERNAME: postgres
+  PATRONI_SUPERUSER_PASSWORD: test
+  PATRONI_REPLICATION_USERNAME: replicator
+  PATRONI_REPLICATION_PASSWORD: test
+  PATRONI_REWIND_USERNAME: rewind
+  PATRONI_REWIND_PASSWORD: test
+
+x-postgres-common: &postgres-common
+  image: postgres-hasura-playground/postgres-patroni:local
+  build:
+    context: .
+    dockerfile: images/postgres-patroni/Dockerfile
+  restart: unless-stopped
+  networks: [playground]
+  depends_on:
+    etcd1:
+      condition: service_healthy
+    etcd2:
+      condition: service_healthy
+    etcd3:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8008/health >/dev/null && pg_isready -q -h 127.0.0.1 -U postgres"]
+    interval: 5s
+    timeout: 4s
+    retries: 30
+    start_period: 30s
+
+services:
+  etcd1:
+    <<: *etcd-common
+    command:
+      - etcd
+      - --name=etcd1
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd1:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd1:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=postgres-hasura-playground
+    volumes:
+      - etcd1-data:/etcd-data
+
+  etcd2:
+    <<: *etcd-common
+    command:
+      - etcd
+      - --name=etcd2
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd2:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd2:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=postgres-hasura-playground
+    volumes:
+      - etcd2-data:/etcd-data
+
+  etcd3:
+    <<: *etcd-common
+    command:
+      - etcd
+      - --name=etcd3
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd3:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd3:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=postgres-hasura-playground
+    volumes:
+      - etcd3-data:/etcd-data
+
+  postgres1:
+    <<: *postgres-common
+    environment:
+      <<: *postgres-environment
+      PATRONI_NAME: postgres1
+      PATRONI_POSTGRESQL_CONNECT_ADDRESS: postgres1:5432
+      PATRONI_RESTAPI_CONNECT_ADDRESS: postgres1:8008
+    ports:
+      - "127.0.0.1:${PATRONI1_HOST_PORT:-8008}:8008"
+    volumes:
+      - postgres1-data:/var/lib/postgresql/data
+
+  postgres2:
+    <<: *postgres-common
+    environment:
+      <<: *postgres-environment
+      PATRONI_NAME: postgres2
+      PATRONI_POSTGRESQL_CONNECT_ADDRESS: postgres2:5432
+      PATRONI_RESTAPI_CONNECT_ADDRESS: postgres2:8008
+    ports:
+      - "127.0.0.1:${PATRONI2_HOST_PORT:-8009}:8008"
+    volumes:
+      - postgres2-data:/var/lib/postgresql/data
+
+  postgres3:
+    <<: *postgres-common
+    environment:
+      <<: *postgres-environment
+      PATRONI_NAME: postgres3
+      PATRONI_POSTGRESQL_CONNECT_ADDRESS: postgres3:5432
+      PATRONI_RESTAPI_CONNECT_ADDRESS: postgres3:8008
+    ports:
+      - "127.0.0.1:${PATRONI3_HOST_PORT:-8010}:8008"
+    volumes:
+      - postgres3-data:/var/lib/postgresql/data
+
+  haproxy:
+    image: *haproxy-image
+    restart: unless-stopped
+    networks: [playground]
+    depends_on:
+      postgres1:
+        condition: service_healthy
+      postgres2:
+        condition: service_healthy
+      postgres3:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+      - "127.0.0.1:${HAPROXY_STATS_HOST_PORT:-7000}:7000"
+    volumes:
+      - ./config/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- 'http://127.0.0.1:7000/stats;csv' | awk -F, '$$1 == \"postgres_primary\" && $$2 ~ /^postgres[123]$$/ && $$18 == \"UP\" { up++ } END { exit !(up == 1) }'"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+      start_period: 10s
+
+  database-init:
+    image: postgres:16.14-bookworm
+    restart: "no"
+    networks: [playground]
+    depends_on:
+      haproxy:
+        condition: service_healthy
+    environment:
+      PGHOST: haproxy
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: test
+      PGDATABASE: postgres
+    entrypoint: ["/bin/bash", "/usr/local/bin/init-database.sh"]
+    volumes:
+      - ./scripts/init-database.sh:/usr/local/bin/init-database.sh:ro
+      - ./init/sql/001-databases.sql:/init/sql/001-databases.sql:ro
+
+  hasura:
+    image: hasura/graphql-engine:v2.42.0
+    restart: unless-stopped
+    networks: [playground]
+    depends_on:
+      database-init:
+        condition: service_completed_successfully
+    environment:
+      HASURA_GRAPHQL_METADATA_DATABASE_URL: postgres://hasura_metadata:test@haproxy:5432/hasura_metadata
+      PG_DATABASE_URL: postgres://hasura_app:test@haproxy:5432/app
+      HASURA_GRAPHQL_ADMIN_SECRET: test
+      HASURA_GRAPHQL_ENABLE_CONSOLE: "true"
+      HASURA_GRAPHQL_DEV_MODE: "true"
+      HASURA_GRAPHQL_ENABLE_TELEMETRY: "false"
+    ports:
+      - "127.0.0.1:${HASURA_HOST_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--header", "x-hasura-admin-secret: test", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+      start_period: 20s
+
+  hasura-init:
+    image: hasura/graphql-engine:v2.42.0.cli-migrations-v3
+    restart: "no"
+    networks: [playground]
+    depends_on:
+      hasura:
+        condition: service_healthy
+    entrypoint: ["/bin/hasura-cli"]
+    working_dir: /hasura
+    environment:
+      HASURA_GRAPHQL_ENDPOINT: http://hasura:8080
+      HASURA_GRAPHQL_ADMIN_SECRET: test
+      HASURA_GRAPHQL_DISABLE_INTERACTIVE: "true"
+      HASURA_GRAPHQL_ENABLE_TELEMETRY: "false"
+      PG_DATABASE_URL: postgres://hasura_app:test@haproxy:5432/app
+    volumes:
+      - ./hasura:/hasura:ro
+    command: ["--skip-update-check", "--no-color", "deploy", "--with-seeds"]
+
+networks:
+  playground:
+    driver: bridge
+
+volumes:
+  etcd1-data:
+  etcd2-data:
+  etcd3-data:
+  postgres1-data:
+  postgres2-data:
+  postgres3-data:

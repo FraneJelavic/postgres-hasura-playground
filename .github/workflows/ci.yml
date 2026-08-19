@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: Static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install local check dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq shellcheck yamllint
+      - name: Repository checks
+        run: make check
+      - name: Dockerfile validation
+        uses: hadolint/hadolint-action@v3.4.0
+        with:
+          dockerfile: images/postgres-patroni/Dockerfile
+      - name: Workflow validation
+        uses: raven-actions/actionlint@v2
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  integration-amd64:
+    name: Integration (linux/amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPOSE_PROJECT_NAME: postgres-hasura-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      DOCKER_DEFAULT_PLATFORM: linux/amd64
+    steps:
+      - uses: actions/checkout@v7
+      - name: Full runtime verification
+        run: make verify
+      - name: Capture failure diagnostics
+        if: failure()
+        run: |
+          ./scripts/compose.sh ps --all > compose-ps.txt || true
+          ./scripts/compose.sh logs --no-color > compose-logs.txt || true
+          docker volume ls \
+            --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME}" \
+            > compose-volumes.txt || true
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: diagnostics-amd64
+          path: compose-*.txt
+      - name: Cleanup isolated Compose project
+        if: always()
+        env:
+          CONFIRM_RESET: YES
+        run: ./scripts/reset.sh

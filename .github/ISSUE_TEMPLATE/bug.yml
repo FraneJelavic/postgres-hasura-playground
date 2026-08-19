@@ -1,0 +1,40 @@
+name: Bug report
+description: Report a reproducible playground problem
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: Do not include passwords, credentials, keys, or private URLs.
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: OS, architecture, Docker/Compose or Colima versions
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Include the smallest sequence that reproduces the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: Include Compose state and relevant logs with sensitive values removed.
+    validations:
+      required: true

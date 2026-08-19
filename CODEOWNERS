@@ -1,0 +1,13 @@
+# Default review ownership for all repository content.
+* @FraneJelavic
+
+# Require focused review for runtime topology, persistent schema, and governance.
+/compose.yaml @FraneJelavic
+/config/ @FraneJelavic
+/hasura/ @FraneJelavic
+/init/ @FraneJelavic
+/images/ @FraneJelavic
+/scripts/ @FraneJelavic
+/docs/ @FraneJelavic
+/LICENSE @FraneJelavic
+/NOTICE @FraneJelavic
