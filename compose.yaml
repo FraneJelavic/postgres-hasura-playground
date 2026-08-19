@@ -170,6 +170,48 @@ services:
       - ./scripts/init-database.sh:/usr/local/bin/init-database.sh:ro
       - ./init/sql/001-databases.sql:/init/sql/001-databases.sql:ro
 
+  hasura:
+    image: hasura/graphql-engine:v2.42.0
+    restart: unless-stopped
+    networks: [playground]
+    depends_on:
+      database-init:
+        condition: service_completed_successfully
+    environment:
+      HASURA_GRAPHQL_METADATA_DATABASE_URL: postgres://hasura_metadata:test@haproxy:5432/hasura_metadata
+      PG_DATABASE_URL: postgres://hasura_app:test@haproxy:5432/app
+      HASURA_GRAPHQL_ADMIN_SECRET: test
+      HASURA_GRAPHQL_ENABLE_CONSOLE: "true"
+      HASURA_GRAPHQL_DEV_MODE: "true"
+      HASURA_GRAPHQL_ENABLE_TELEMETRY: "false"
+    ports:
+      - "127.0.0.1:${HASURA_HOST_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--header", "x-hasura-admin-secret: test", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+      start_period: 20s
+
+  hasura-init:
+    image: hasura/graphql-engine:v2.42.0.cli-migrations-v3
+    restart: "no"
+    networks: [playground]
+    depends_on:
+      hasura:
+        condition: service_healthy
+    entrypoint: ["/bin/hasura-cli"]
+    working_dir: /hasura
+    environment:
+      HASURA_GRAPHQL_ENDPOINT: http://hasura:8080
+      HASURA_GRAPHQL_ADMIN_SECRET: test
+      HASURA_GRAPHQL_DISABLE_INTERACTIVE: "true"
+      HASURA_GRAPHQL_ENABLE_TELEMETRY: "false"
+      PG_DATABASE_URL: postgres://hasura_app:test@haproxy:5432/app
+    volumes:
+      - ./hasura:/hasura:ro
+    command: ["--skip-update-check", "--no-color", "deploy", "--with-seeds"]
+
 networks:
   playground:
     driver: bridge
