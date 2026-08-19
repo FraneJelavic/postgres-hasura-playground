@@ -152,6 +152,24 @@ services:
       retries: 20
       start_period: 10s
 
+  database-init:
+    image: postgres:16.14-bookworm
+    restart: "no"
+    networks: [playground]
+    depends_on:
+      haproxy:
+        condition: service_healthy
+    environment:
+      PGHOST: haproxy
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: test
+      PGDATABASE: postgres
+    entrypoint: ["/bin/bash", "/usr/local/bin/init-database.sh"]
+    volumes:
+      - ./scripts/init-database.sh:/usr/local/bin/init-database.sh:ro
+      - ./init/sql/001-databases.sql:/init/sql/001-databases.sql:ro
+
 networks:
   playground:
     driver: bridge
