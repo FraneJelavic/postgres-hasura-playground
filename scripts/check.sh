@@ -60,17 +60,19 @@ for script in "${shell_scripts[@]}"; do
 done
 shellcheck "${shell_scripts[@]}"
 
-hasura_yaml=()
-if [[ -d "${root_dir}/hasura" ]]; then
-  while IFS= read -r -d '' yaml_path; do
-    hasura_yaml+=("${yaml_path}")
-  done < <(find "${root_dir}/hasura" -type f \
-    \( -name '*.yaml' -o -name '*.yml' \) -print0)
-fi
-if (( ${#hasura_yaml[@]} > 0 )); then
+repository_yaml=()
+while IFS= read -r -d '' yaml_path; do
+  repository_yaml+=("${root_dir}/${yaml_path}")
+done < <(
+  git -C "${root_dir}" ls-files --cached --others --exclude-standard -z \
+    '*.yaml' '*.yml'
+)
+if (( ${#repository_yaml[@]} > 0 )); then
   require_commands yamllint
-  yamllint --config-data relaxed "${hasura_yaml[@]}" || \
-    fail 'Hasura configuration or metadata contains invalid YAML'
+  yamllint \
+    --config-data '{extends: relaxed, rules: {line-length: disable}}' \
+    "${repository_yaml[@]}" || \
+    fail 'repository configuration contains invalid YAML'
 fi
 
 if scan_repository \

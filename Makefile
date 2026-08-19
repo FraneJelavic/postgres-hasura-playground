@@ -30,6 +30,7 @@ reset:
 
 check:
 	./scripts/check.sh
+	$(MAKE) check-diagrams
 
 diagrams:
 	./scripts/render-diagrams.sh
