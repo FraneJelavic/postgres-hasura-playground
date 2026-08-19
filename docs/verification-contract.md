@@ -16,9 +16,10 @@ Hasura strict health, and the last GraphQL response.
 - A former primary rejoining as a streaming replica: 120 seconds.
 
 The controlled-switchover and abrupt-failover recovery checks include the new sole
-primary, the exclusive HAProxy route, a writable SQL route, and a successful
-authenticated GraphQL query in the same bounded wait. GraphQL transport failures
-and GraphQL `errors` payloads are retryable only inside those recovery waits.
+primary, the exclusive HAProxy route, a writable SQL route, strict Hasura health,
+and a successful authenticated GraphQL query in the same bounded wait. GraphQL
+transport failures and GraphQL `errors` payloads are retryable only inside those
+recovery waits.
 
 ## Ordered scenario
 
@@ -36,23 +37,30 @@ The verifier performs these steps in order:
 4. Require `wal_level=replica` and zero logical replication slots. Patroni-managed
    physical slots are expected and are not rejected.
 5. Require `GET /healthz?strict=true` to return `OK`, then query the single seeded
-   todo through authenticated GraphQL.
-6. Insert and read a uniquely named todo through GraphQL, then query every
+   todo through authenticated GraphQL. Require `app` to be owned by `hasura_app`
+   and `hasura_metadata` by `hasura_metadata`; both roles must be login-capable and
+   authenticate through HAProxy using the fixed local password.
+6. Run the same complete boundary report as `make status`, covering Compose service
+   health, etcd, Patroni, HAProxy, writable SQL, strict Hasura health, initializer
+   success, and an authenticated todos query.
+7. Insert and read a uniquely named todo through GraphQL, then query every
    PostgreSQL member directly until the row is present everywhere.
-7. Select a healthy replica, run a non-interactive Patroni controlled switchover,
-   and require the chosen candidate, HAProxy, writable SQL, and GraphQL to recover
-   within 60 seconds. The former primary must stream again within 120 seconds.
-8. Insert and read a second unique todo, then wait until all three members contain
-   it before the destructive failure step.
-9. Abruptly kill the current primary. Within 60 seconds, require a different sole
-   primary, exclusive HAProxy rerouting, writable SQL, and a successful GraphQL
-   query. Restart the killed member and require it to rejoin as a streaming replica
+8. Select a healthy replica, run a non-interactive Patroni controlled switchover,
+   and require the chosen candidate, HAProxy, writable SQL, strict Hasura health,
+   and GraphQL to recover within 60 seconds. The former primary must stream again
    within 120 seconds.
-10. Run `docker compose down` without `--volumes`, then start the stack again from
+9. Insert and read a second unique todo, then wait until all three members contain
+   it before the destructive failure step.
+10. Abruptly kill the current primary. Within 60 seconds, require a different sole
+    primary, exclusive HAProxy rerouting, writable SQL, strict Hasura health, and
+    a successful GraphQL query. Restart the killed member and require it to rejoin
+    as a streaming replica within 120 seconds.
+11. Run `docker compose down` without `--volumes`, then start the stack again from
     the preserved named volumes. Re-run both one-shot initializers in the same
-    ordinary-health-then-strict-health order and require healthy topology, exactly
-    one seed row, and both inserted todos to remain visible. This second successful
-    initializer run is the executable idempotence check.
+    ordinary-health-then-strict-health order and require healthy topology, exact
+    database owners/login roles, exactly one seed row, and both inserted todos to
+    remain visible. Run the full status boundary report again. This second
+    successful initializer run is the executable idempotence check.
 
 ## Failure semantics
 

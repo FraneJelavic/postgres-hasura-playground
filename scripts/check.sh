@@ -47,6 +47,61 @@ scan_repository() {
 
 require_commands bash find git grep shellcheck
 
+assert_hasura_project_invariants() {
+  local hasura_dir="$root_dir/hasura"
+  local config_file="$hasura_dir/config.yaml"
+  local metadata_version_file="$hasura_dir/metadata/version.yaml"
+  local databases_file="$hasura_dir/metadata/databases/databases.yaml"
+  local tables_file="$hasura_dir/metadata/databases/app/tables/tables.yaml"
+  local todos_file="$hasura_dir/metadata/databases/app/tables/public_todos.yaml"
+  local source_count from_env_count table_count table_file
+
+  [[ -f "$config_file" && -f "$metadata_version_file" && -f "$databases_file" \
+    && -f "$tables_file" && -f "$todos_file" ]] || \
+    fail 'Hasura project is missing a required config, metadata, or table file'
+
+  grep -qx 'version: 3' "$config_file" || \
+    fail 'Hasura config.yaml must use project format version 3'
+  if ! grep -qx 'metadata_directory: metadata' "$config_file" \
+    || ! grep -qx 'migrations_directory: migrations' "$config_file" \
+    || ! grep -qx 'seeds_directory: seeds' "$config_file"; then
+    fail 'Hasura config.yaml must use tracked metadata, migration, and seed paths'
+  fi
+  grep -qx 'version: 3' "$metadata_version_file" || \
+    fail 'Hasura metadata must use version 3'
+
+  source_count=$(grep -Ec '^[[:space:]]*-[[:space:]]+name:[[:space:]]*[^[:space:]]+[[:space:]]*$' \
+    "$databases_file" || true)
+  from_env_count=$(grep -Ec '^[[:space:]]*from_env:[[:space:]]*[^[:space:]]+[[:space:]]*$' \
+    "$databases_file" || true)
+  [[ "$source_count" == 1 ]] || \
+    fail 'Hasura metadata must declare exactly one database source'
+  grep -Eq '^[[:space:]]*-[[:space:]]+name:[[:space:]]*app[[:space:]]*$' \
+    "$databases_file" || fail 'Hasura metadata source must be named app'
+  if [[ "$from_env_count" != 1 ]] \
+    || ! grep -Eq '^[[:space:]]*from_env:[[:space:]]*PG_DATABASE_URL[[:space:]]*$' \
+      "$databases_file"; then
+    fail 'Hasura app source must resolve only from PG_DATABASE_URL'
+  fi
+
+  grep -Eq '^[[:space:]]*-[[:space:]]*"!include[[:space:]]+public_todos\.yaml"[[:space:]]*$' \
+    "$tables_file" || fail 'Hasura app source must include public_todos metadata'
+  [[ $(grep -Ec '^[[:space:]]*![[:space:]]*include|^[[:space:]]*-[[:space:]]*"!include' \
+    "$tables_file" || true) == 1 ]] || \
+    fail 'Hasura app source must track exactly one table metadata file'
+
+  table_count=0
+  while IFS= read -r -d '' table_file; do
+    table_count=$((table_count + $(grep -Ec '^[[:space:]]*table:[[:space:]]*$' "$table_file" || true)))
+  done < <(find "$hasura_dir/metadata" -type f -name '*.yaml' -print0)
+  [[ "$table_count" == 1 ]] || \
+    fail 'Hasura metadata must track exactly one table'
+  if ! grep -Eq '^[[:space:]]*name:[[:space:]]*todos[[:space:]]*$' "$todos_file" \
+    || ! grep -Eq '^[[:space:]]*schema:[[:space:]]*public[[:space:]]*$' "$todos_file"; then
+    fail 'Hasura metadata must track only public.todos'
+  fi
+}
+
 shell_scripts=()
 while IFS= read -r -d '' script_path; do
   shell_scripts+=("${script_path}")
@@ -73,6 +128,10 @@ if (( ${#repository_yaml[@]} > 0 )); then
     --config-data '{extends: relaxed, rules: {line-length: disable}}' \
     "${repository_yaml[@]}" || \
     fail 'repository configuration contains invalid YAML'
+fi
+
+if [[ -d "${root_dir}/hasura" ]]; then
+  assert_hasura_project_invariants
 fi
 
 if scan_repository \

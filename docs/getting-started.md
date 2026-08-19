@@ -109,7 +109,7 @@ not only curl's exit status.
 | `make logs` | Follow recent logs from all services |
 | `make down` | Remove containers and the network while preserving named volumes |
 | `make reset` | Confirm, then delete this project's containers and named volumes |
-| `make check` | Run static, policy, Compose, YAML, and shell checks |
+| `make check` | Run static, policy, Compose, YAML, shell, and C4 diagram-drift checks |
 | `make diagrams` | Regenerate the tracked C4 PNGs |
 | `make check-diagrams` | Check that tracked C4 PNGs match their source |
 

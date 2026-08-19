@@ -25,15 +25,42 @@ mkdir -p "$state_dir" "$output_dir"
 build_dir=$(mktemp -d "$state_dir/c4-render.XXXXXX")
 trap 'rm -rf "$build_dir"' EXIT
 
-docker run --rm \
-  --user "$(id -u):$(id -g)" \
-  --workdir /usr/local/structurizr \
-  --volume "$root_dir/docs/c4/src:/usr/local/structurizr/docs/c4/src:ro" \
-  --volume "$build_dir:/usr/local/structurizr/.state/c4-render" \
-  "$structurizr_image" export \
-  -workspace docs/c4/src/workspace.dsl \
-  -format plantuml/structurizr \
-  -output .state/c4-render
+run_with_retries() {
+  local attempts=$1 description=$2 attempt=1 exit_code
+  shift 2
+
+  while true; do
+    if "$@"; then
+      return 0
+    else
+      exit_code=$?
+    fi
+
+    if ((attempt >= attempts)); then
+      printf '%s failed after %s attempts.\n' "$description" "$attempts" >&2
+      return "$exit_code"
+    fi
+
+    printf '%s failed with exit code %s; retrying (%s/%s).\n' \
+      "$description" "$exit_code" "$attempt" "$attempts" >&2
+    attempt=$((attempt + 1))
+    sleep 2
+  done
+}
+
+export_structurizr() {
+  docker run --rm \
+    --user "$(id -u):$(id -g)" \
+    --workdir /usr/local/structurizr \
+    --volume "$root_dir/docs/c4/src:/usr/local/structurizr/docs/c4/src:ro" \
+    --volume "$build_dir:/usr/local/structurizr/.state/c4-render" \
+    "$structurizr_image" export \
+    -workspace docs/c4/src/workspace.dsl \
+    -format plantuml/structurizr \
+    -output .state/c4-render
+}
+
+run_with_retries 3 'Structurizr export' export_structurizr
 
 shopt -s nullglob
 sources=("$build_dir"/*.puml)
@@ -52,11 +79,15 @@ for source in "${diagram_sources[@]}"; do
   source_names+=("$(basename "$source")")
 done
 
-docker run --rm \
-  --user "$(id -u):$(id -g)" \
-  --env PLANTUML_LIMIT_SIZE=8192 \
-  --volume "$build_dir:/data" \
-  "$plantuml_image" -tpng "${source_names[@]}"
+render_plantuml() {
+  docker run --rm \
+    --user "$(id -u):$(id -g)" \
+    --env PLANTUML_LIMIT_SIZE=8192 \
+    --volume "$build_dir:/data" \
+    "$plantuml_image" -tpng "${source_names[@]}"
+}
+
+run_with_retries 3 'PlantUML render' render_plantuml
 
 context_png=$(find "$build_dir" -maxdepth 1 -type f -name '*context.png' -print -quit)
 containers_png=$(find "$build_dir" -maxdepth 1 -type f -name '*containers.png' -print -quit)

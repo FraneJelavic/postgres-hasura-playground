@@ -234,6 +234,37 @@ hasura_healthy() {
   [[ "$response" == OK || "$response" == WARN ]]
 }
 
+hasura_databases_and_roles_ready() {
+  local expected_owners expected_roles owners roles runner role database current_user
+
+  expected_owners=$'app:hasura_app\nhasura_metadata:hasura_metadata'
+  owners=$(sql_via_haproxy -Atc \
+    "SELECT datname || ':' || pg_get_userbyid(datdba)
+     FROM pg_database
+     WHERE datname IN ('app', 'hasura_metadata')
+     ORDER BY datname;" 2>/dev/null) || return 1
+  [[ "$owners" == "$expected_owners" ]] || return 1
+
+  expected_roles=$'hasura_app:true\nhasura_metadata:true'
+  roles=$(sql_via_haproxy -Atc \
+    "SELECT rolname || ':' || rolcanlogin
+     FROM pg_roles
+     WHERE rolname IN ('hasura_app', 'hasura_metadata')
+     ORDER BY rolname;" 2>/dev/null) || return 1
+  [[ "$roles" == "$expected_roles" ]] || return 1
+
+  runner=$(first_running_postgres) || return 1
+  while IFS=: read -r role database; do
+    current_user=$(compose exec -T --env "PGPASSWORD=test" "$runner" \
+      psql -XAt -v ON_ERROR_STOP=1 -h haproxy -p 5432 \
+      -U "$role" -d "$database" -c 'SELECT current_user;' 2>/dev/null) || return 1
+    [[ "$current_user" == "$role" ]] || return 1
+  done <<'EOF'
+hasura_app:app
+hasura_metadata:hasura_metadata
+EOF
+}
+
 graphql_response_has_no_errors() {
   jq -e 'type == "object" and ((.errors // []) | length == 0)' \
     "$graphql_response_file" >/dev/null 2>&1

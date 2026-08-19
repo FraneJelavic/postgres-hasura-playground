@@ -27,8 +27,9 @@ privileges as a workaround.
 
 On a cold image cache, allow time for image download and the custom Patroni build.
 Check Colima resources and available disk. If the host is merely slow, increase
-`COMPOSE_READINESS_TIMEOUT_SECONDS` consistently for `make up` and `make status`;
-do not use a longer timeout to hide a repeatedly failing health check.
+`COMPOSE_READINESS_TIMEOUT_SECONDS` for `make up`; do not use a longer timeout to
+hide a repeatedly failing health check. `make status` reports the current state
+immediately rather than waiting for readiness.
 
 ## A host port is already in use
 

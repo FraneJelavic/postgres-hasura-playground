@@ -28,6 +28,7 @@ leadership_and_graphql_ready() {
   local expected_primary=$1 todo_title=$2
   primary_is "$expected_primary" \
     && haproxy_routes_only_to "$expected_primary" \
+    && hasura_strict_healthy \
     && graphql_todo_visible "$todo_title"
 }
 
@@ -48,6 +49,7 @@ different_primary_and_graphql_ready() {
   candidate=$(discover_primary 2>/dev/null || true)
   [[ -n "$candidate" && "$candidate" != "$former_primary" ]] \
     && haproxy_routes_only_to "$candidate" \
+    && hasura_strict_healthy \
     && graphql_todo_visible "$todo_title"
 }
 
@@ -82,6 +84,10 @@ hasura_strict_healthy
 graphql_todo_visible "$SEED_TODO_TITLE"
 seed_count=$(graphql_todo_count "$SEED_TODO_TITLE")
 [[ "$seed_count" == 1 ]]
+hasura_databases_and_roles_ready
+
+stage 'run complete status boundary assertions'
+"$script_dir/status.sh"
 
 stage 'insert a todo through GraphQL and wait for all PostgreSQL members'
 pre_switchover_todo=$(unique_todo_title pre-switchover)
@@ -155,6 +161,10 @@ graphql_todo_visible "$SEED_TODO_TITLE"
 [[ $(graphql_todo_count "$SEED_TODO_TITLE") == 1 ]]
 graphql_todo_visible "$pre_switchover_todo"
 graphql_todo_visible "$pre_failover_todo"
+hasura_databases_and_roles_ready
+
+stage 'run final status boundary assertions'
+"$script_dir/status.sh"
 
 trap - ERR
 printf '\nVerification passed: controlled switchover %s -> %s; abrupt failover %s -> %s; rejoin and persistence succeeded.\n' \
